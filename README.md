@@ -1,6 +1,6 @@
 # 📘 Libro Registro de Socios – v2
 
-[![CI](https://github.com/Cokul/libro-socios-v2/actions/workflows/ci.yml/badge.svg)](https://github.com/Cokul/libro-socios-v2/actions/workflows/ci.yml)
+[![CI](https://github.com/Cokul/libro-socios-v2/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Cokul/libro-socios-v2/actions/workflows/ci.yml)
 
 Aplicación en **Streamlit + SQLite** para la gestión del Libro Registro de Socios conforme a la **Ley de Sociedades de Capital**.  
 
