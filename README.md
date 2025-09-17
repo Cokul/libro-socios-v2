@@ -91,4 +91,4 @@ docs/               # Manuales y memo de desarrollo
 
 ## 📜 Licencia
 
-Uso interno. Todos los derechos reservados.
+Este proyecto se distribuye bajo la licencia [MIT](LICENSE).

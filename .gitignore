@@ -1,3 +1,4 @@
+# Bytecode y cachés
 __pycache__/
 *.pyc
 
@@ -18,9 +19,16 @@ data/backups/
 logs/
 *.log
 
-# Builds/dist
+# Builds / dist
 dist/
 build/
 
 # macOS
 .DS_Store
+
+# Archivos/carpetas internas que no deben subirse
+_archive/
+_review_correlativos/
+migrations/
+CODEBUNDLE.txt
+TREEMAP.txt
