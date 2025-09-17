@@ -1,0 +1,18 @@
+[run]
+branch = True
+source =
+    app/core
+    app/infra
+omit =
+    app/ui/*
+    app/streamlit_app.py
+    app/infra/pdf_fonts.py
+    app/core/services/export_service.py  # (pesado, I/O/pdf)
+    */__init__.py
+
+[report]
+show_missing = True
+fail_under = 65
+
+[html]
+directory = htmlcov

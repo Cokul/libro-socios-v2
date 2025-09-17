@@ -1,0 +1,6 @@
+streamlit>=1.49
+pandas>=2.3
+reportlab>=4.4
+XlsxWriter>=3.2
+typing-extensions>=4.15
+streamlit-aggrid

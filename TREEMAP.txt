@@ -1,0 +1,150 @@
+.
+├── _archive
+│   ├── app
+│   │   ├── core
+│   │   │   └── services
+│   │   │       └── legacy_bridge_service.py
+│   │   └── legacy_v1
+│   │       ├── __init__.py
+│   │       ├── app_helpers.py
+│   │       ├── app.py
+│   │       ├── config.py
+│   │       ├── constants.py
+│   │       ├── db.py
+│   │       └── services.py
+│   └── tools
+│       ├── migrate_backfill_v1_parties.py
+│       ├── migrate_events_cleanup.py
+│       ├── migrate_events_populate.py
+│       ├── migrate_merge_referencia.py
+│       ├── migrate_schema.py
+│       ├── recompute_correlativo.py
+│       ├── recompute_correlativos_all.py
+│       └── sql
+│           ├── cleanup_events_drop_columns_v2.sql
+│           └── cleanup_events_drop_columns.sql
+├── _review_correlativos
+│   ├── _archive
+│   │   ├── app
+│   │   │   ├── core
+│   │   │   │   └── services
+│   │   │   │       └── legacy_bridge_service.py
+│   │   │   └── legacy_v1
+│   │   │       ├── db.py
+│   │   │       └── services.py
+│   │   └── tools
+│   │       ├── recompute_correlativo.py
+│   │       └── recompute_correlativos_all.py
+│   ├── _filelist.txt
+│   ├── app
+│   │   ├── core
+│   │   │   ├── enums.py
+│   │   │   ├── models.py
+│   │   │   ├── repositories
+│   │   │   │   ├── base.py
+│   │   │   │   ├── companies_repo.py
+│   │   │   │   ├── events_repo.py
+│   │   │   │   ├── governance_repo.py
+│   │   │   │   └── partners_repo.py
+│   │   │   ├── services
+│   │   │   │   ├── backup_service.py
+│   │   │   │   ├── compute_service.py
+│   │   │   │   ├── events_service.py
+│   │   │   │   ├── export_service.py
+│   │   │   │   ├── maintenance_service.py
+│   │   │   │   └── partners_service.py
+│   │   │   └── validators.py
+│   │   ├── infra
+│   │   │   ├── constants.py
+│   │   │   └── db.py
+│   │   ├── streamlit_app.py
+│   │   └── ui
+│   │       └── pages
+│   │           ├── events.py
+│   │           ├── partners.py
+│   │           └── utilities.py
+│   ├── code_bundle_correlativos.txt
+│   └── migrations
+│       ├── V01_bootstrap.sql
+│       ├── V02_add_partners_board_columns.sql
+│       ├── V03_event_types_seed.sql
+│       └── V04_add_companies_extras.sql
+├── app
+│   ├── __init__.py
+│   ├── assets
+│   │   └── fonts
+│   │       ├── DejaVuSans-Bold.ttf
+│   │       ├── DejaVuSans-BoldOblique.ttf
+│   │       ├── DejaVuSans-Oblique.ttf
+│   │       └── DejaVuSans.ttf
+│   ├── core
+│   │   ├── __init__.py
+│   │   ├── enums.py
+│   │   ├── models.py
+│   │   ├── repositories
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py
+│   │   │   ├── companies_repo.py
+│   │   │   ├── events_repo.py
+│   │   │   ├── governance_repo.py
+│   │   │   └── partners_repo.py
+│   │   ├── services
+│   │   │   ├── __init__.py
+│   │   │   ├── backup_service.py
+│   │   │   ├── companies_service.py
+│   │   │   ├── compute_service.py
+│   │   │   ├── events_service.py
+│   │   │   ├── export_service.py
+│   │   │   ├── governance_service.py
+│   │   │   ├── import_service.py
+│   │   │   ├── maintenance_service.py
+│   │   │   ├── normalization_service.py
+│   │   │   ├── partners_service.py
+│   │   │   └── reporting_service.py
+│   │   └── validators.py
+│   ├── infra
+│   │   ├── __init__.py
+│   │   ├── constants.py
+│   │   ├── db.py
+│   │   ├── healthcheck.py
+│   │   ├── logging.py
+│   │   └── pdf_fonts.py
+│   ├── streamlit_app.py
+│   └── ui
+│       ├── __init__.py
+│       ├── layout.py
+│       ├── pages
+│       │   ├── __init__.py
+│       │   ├── companies.py
+│       │   ├── events.py
+│       │   ├── governance.py
+│       │   ├── imports.py
+│       │   ├── overview.py
+│       │   ├── partners.py
+│       │   ├── reports.py
+│       │   └── utilities.py
+│       └── routing.py
+├── carpeta sin título
+├── data
+├── docs
+│   └── manual eventos.txt
+├── migrations
+│   ├── V01_bootstrap.sql
+│   ├── V02_add_partners_board_columns.sql
+│   ├── V03_event_types_seed.sql
+│   └── V04_add_companies_extras.sql
+├── mypy.ini
+├── pytest.ini
+├── README.md
+├── requirements-dev.txt
+├── requirements.txt
+├── tests
+│   ├── conftest.py
+│   ├── test_enums.py
+│   ├── test_normalization_denorm.py
+│   ├── test_normalization.py
+│   └── test_validators.py
+├── tools
+└── TREEMAP.txt
+
+38 directories, 110 files

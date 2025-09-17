@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+
+# Entornos virtuales
+venv/
+.venv/
+
+# SQLite
+data/*.db
+data/*.sqlite*
+data/*.db-shm
+data/*.db-wal
+
+# Copias de seguridad
+data/backups/
+
+# Logs
+logs/
+*.log
+
+# Builds/dist
+dist/
+build/
+
+# macOS
+.DS_Store
