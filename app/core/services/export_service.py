@@ -1406,6 +1406,7 @@ def export_ledger_pdf_legalizable(
     return buf
 
 # === PDF: Certificado histórico (trayectoria del socio) ===
+# === Sustituye íntegramente la función por esta ===
 def export_partner_history_pdf(
     company_id: int,
     partner_id: int,
@@ -1414,59 +1415,118 @@ def export_partner_history_pdf(
     max_rows: int = 500,
 ) -> BytesIO:
     """
-    Certificado histórico del socio: cabecera + tabla con los asientos que le afectaron
-    en el periodo (o desde el inicio si no se indica 'date_from'), e incluye cambios de VN.
-
-    - Muestra filas donde el socio aparece como transmite o adquiere.
-    - Campos: Nº asiento (si existe), fecha, tipo, contrapartes, RD–RH, #parts (si se puede deducir),
-      VN vigente en la fecha (o 'nuevo_valor_nominal' si cambió en ese asiento), doc/obs abreviado.
+    Certificado histórico del socio (A4 vertical):
+    - Fuente de datos: movements(company_id, date_from, date_to, event_types=None)
+      filtrado por filas donde el socio participa (transmite o adquiere).
+    - Columnas: Fecha · Tipo · Nº · RD–RH · # Parts. · VN (€) · Contraparte
     """
     ensure_pdf_base_fonts()
     from_date = date_from or "0001-01-01"
     to_date = date_to or datetime.now().strftime("%Y-%m-%d")
 
-    # Datos base
+    # -------- Datos base
     comp = _company_header(company_id)
     pos  = partner_position(company_id, partner_id, to_date) or {}
-    hist = last_entries_for_partner(company_id, partner_id, limit=max_rows, as_of=to_date)
 
-    # Normaliza y filtra por rango de fechas si llegan ambas
-    if hist is None or hist.empty:
-        hist = pd.DataFrame(columns=[
-            "id","correlativo","fecha","tipo","socio_transmite","socio_adquiere",
-            "rango_desde","rango_hasta","n_participaciones","nuevo_valor_nominal",
-            "documento","observaciones"
+    # 1) Trae todos los movimientos del periodo y filtra por socio afectado
+    df = movements(company_id, from_date, to_date, event_types=None)
+    if df is None or df.empty:
+        df = pd.DataFrame(columns=[
+            "id","correlativo","fecha","tipo",
+            "socio_transmite","socio_adquiere",
+            "rango_desde","rango_hasta","n_participaciones",
+            "nuevo_valor_nominal","documento","observaciones"
         ])
     else:
-        hist = hist.copy()
-        if "fecha" in hist.columns:
-            hist = hist[(hist["fecha"] >= from_date) & (hist["fecha"] <= to_date)]
+        df = df.copy()
 
-    # Prepara texto de contraparte y #parts
+    # Normaliza columnas de IDs (si no existen, toma las "planas")
+    if "socio_transmite_id" not in df.columns:
+        df["socio_transmite_id"] = df["socio_transmite"] if "socio_transmite" in df.columns else None
+    if "socio_adquiere_id" not in df.columns:
+        df["socio_adquiere_id"] = df["socio_adquiere"] if "socio_adquiere" in df.columns else None
+
+    # Filtra filas donde participa el socio
+    def _eq_pid(x) -> bool:
+        try:
+            return str(int(x)) == str(int(partner_id))
+        except Exception:
+            return False
+
+    df = df[(df["socio_transmite_id"].apply(_eq_pid)) | (df["socio_adquiere_id"].apply(_eq_pid))]
+
+    # Orden y límite
+    if not df.empty:
+        if "fecha" in df.columns and "id" in df.columns:
+            df = df.sort_values(by=["fecha", "id"], na_position="last")
+        df = df.head(max_rows)
+
+    # Enriquecer nombres de contrapartes si no vienen
+    pmap = _partners_lookup(company_id)
+    if "socio_transmite_nombre" not in df.columns:
+        df["socio_transmite_nombre"] = df["socio_transmite_id"].map(
+            lambda x: (pmap.get(int(x), {}).get("nombre", "") if pd.notna(x) else "")
+        )
+    if "socio_adquiere_nombre" not in df.columns:
+        df["socio_adquiere_nombre"] = df["socio_adquiere_id"].map(
+            lambda x: (pmap.get(int(x), {}).get("nombre", "") if pd.notna(x) else "")
+        )
+
+    # Asegura columnas esperadas para el render
+    for col in ("correlativo","rango_desde","rango_hasta","n_participaciones","nuevo_valor_nominal"):
+        if col not in df.columns:
+            df[col] = None
+
+    # 2) Valores nominales – línea de tiempo
+    vn_steps = _nominal_timeline(company_id)
+
+    def _vn_vigente(r: pd.Series):
+        nv = r.get("nuevo_valor_nominal")
+        try:
+            if nv is not None and not (isinstance(nv, float) and pd.isna(nv)) and float(nv) > 0:
+                return float(nv)
+        except Exception:
+            pass
+        return _vn_on_date(vn_steps, str(r.get("fecha") or ""))
+
+    df["vn_vigente"] = df.apply(_vn_vigente, axis=1)
+
+    # 3) Texto de contraparte (nombres, sin IDs)
     def _counterparty(r: pd.Series) -> str:
-        st = str(r.get("socio_transmite_nombre") or "")
-        sa = str(r.get("socio_adquiere_nombre") or "")
-        # el socio actual es partner_id; la “otra parte” es la que no es él
-        st_id = r.get("socio_transmite_id")
-        sa_id = r.get("socio_adquiere_id")
-        if st_id == partner_id and sa:
-            return sa
-        if sa_id == partner_id and st:
-            return st
-        # gravámenes u otros (usar ambas si aplica)
-        return " / ".join([x for x in (st, sa) if x]).strip()
+        st_name = str(r.get("socio_transmite_nombre") or "").strip()
+        sa_name = str(r.get("socio_adquiere_nombre") or "").strip()
+        st_id   = r.get("socio_transmite_id")
+        sa_id   = r.get("socio_adquiere_id")
 
-    def _parts(r: pd.Series) -> str:
-        # n_participaciones directo si existe; si no, intenta deducir RD–RH
+        # Si el socio es una de las partes, mostrar el nombre de la otra (si existe).
+        if _eq_pid(st_id):
+            return sa_name
+        if _eq_pid(sa_id):
+            return st_name
+        # Como fallback, muestra ambos nombres (si existen)
+        parts = [x for x in (st_name, sa_name) if x]
+        return " / ".join(parts)
+
+    # 4) Cálculo robusto de RD–RH y #Parts.
+    def _range_txt(r: pd.Series) -> str:
+        rd, rh = r.get("rango_desde"), r.get("rango_hasta")
+        def itxt(x):
+            try:    return str(int(x))
+            except: return ""
+        rd_txt, rh_txt = itxt(rd), itxt(rh)
+        return f"{rd_txt}–{rh_txt}".strip("–")
+
+    def _qty_txt(r: pd.Series) -> str:
         n = r.get("n_participaciones")
-        if pd.notna(n) and n:
-            try:
+        try:
+            if n is not None and not (isinstance(n, float) and pd.isna(n)):
                 return f"{int(n):,}".replace(",", ".")
-            except Exception:
-                pass
+        except Exception:
+            pass
+        # si no viene, intenta RD–RH
         rd, rh = r.get("rango_desde"), r.get("rango_hasta")
         try:
-            if pd.notna(rd) and pd.notna(rh):
+            if rd is not None and rh is not None and not (pd.isna(rd) or pd.isna(rh)):
                 val = int(rh) - int(rd) + 1
                 if val > 0:
                     return f"{val:,}".replace(",", ".")
@@ -1474,44 +1534,27 @@ def export_partner_history_pdf(
             pass
         return ""
 
-    # VN vigente por fila (como en el libro legalizable)
-    vn_steps = _nominal_timeline(company_id)
-    def _vn_row(r):
-        nv = r.get("nuevo_valor_nominal")
-        try:
-            if pd.notna(nv) and float(nv or 0) > 0:
-                return float(nv)
-        except Exception:
-            pass
-        return _vn_on_date(vn_steps, str(r.get("fecha") or ""))
-
-    if not hist.empty:
-        # Estándar mínimo de columnas
-        for c in ("socio_transmite_nombre","socio_adquiere_nombre","socio_transmite_id","socio_adquiere_id"):
-            if c not in hist.columns:
-                hist[c] = None
-        hist["vn_vigente"] = hist.apply(_vn_row, axis=1)
-        # Ordena cronológicamente
-        hist = hist.sort_values(by=["fecha","id"], na_position="last").reset_index(drop=True)
-
-    # Render PDF
+    # ================== Render PDF (A4 vertical) ==================
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     W, H = A4
-    y = H - 20 * mm
-    content_width = W - 2 * MARGIN_X
+    MARG_X = 18 * mm
+    MARG_Y = 18 * mm
+    content_w = W - 2 * MARG_X
+    y = H - MARG_Y
 
-    # Título
+    # Cabecera
     c.setTitle("Certificado histórico del socio")
     c.setFont("DejaVuSans-Bold", 13)
-    c.drawString(MARGIN_X, y, "Certificado histórico del socio"); y -= 6 * mm
+    c.drawString(MARG_X, y, "Certificado histórico del socio"); y -= 6 * mm
     c.setFont("DejaVuSans", 9.5)
-    c.drawString(MARGIN_X, y, f"Sociedad: {comp.get('name','')}  •  CIF: {comp.get('cif','')}")
+    c.drawString(MARG_X, y, f"Sociedad: {comp.get('name','')}  •  CIF: {comp.get('cif','')}")
     y -= 4.2 * mm
-    c.drawString(MARGIN_X, y, f"Periodo: {from_date} → {to_date}"); y -= 8 * mm
-    _hr(c, y); y -= SECTION_GAP
+    c.drawString(MARG_X, y, f"Periodo: {from_date} → {to_date}")
+    y -= 7 * mm
+    _hr(c, y); y -= 6 * mm
 
-    # Resumen del socio a fecha final
+    # Resumen socio
     y = _section_title(c, "Resumen a la fecha de corte", y)
     y = _kv(c, y, "Socio", pos.get("partner_name",""))
     y = _kv(c, y, "NIF", pos.get("nif","") or "—")
@@ -1519,76 +1562,141 @@ def export_partner_history_pdf(
     y = _kv(c, y, "Porcentaje a fecha", f"{float(pos.get('pct',0.0)):.4f} %")
     y -= 2 * mm
 
-    # Tabla de trayectoria
+    # Tabla
     y = _section_title(c, "Asientos que afectan al socio", y)
 
-    # Cabecera
+    # Distribución de columnas
     c.setFont("DejaVuSans-Bold", 9.2)
-    x_fecha = MARGIN_X
-    x_tipo  = x_fecha + 26 * mm
-    x_asiento = x_tipo + 26 * mm
-    x_cp   = x_asiento + 18 * mm
-    x_rd   = x_cp + 60 * mm
-    x_rh   = x_rd + 18 * mm
-    x_np   = x_rh + 18 * mm
-    x_vn   = x_np + 20 * mm
+    w_fecha = 24 * mm
+    w_tipo  = 30 * mm
+    w_nro   = 12 * mm
+    w_rng   = 24 * mm
+    w_qty   = 18 * mm
+    w_vn    = 20 * mm
+    gap     = 2 * mm
 
-    def hdr(yy: float) -> float:
-        _col(c, x_fecha,  yy, "Fecha")
-        _col(c, x_tipo,   yy, "Tipo")
-        _col(c, x_asiento,yy, "Nº")
-        _col(c, x_cp,     yy, "Contraparte")
-        _col(c, x_rd,     yy, "Desde")
-        _col(c, x_rh,     yy, "Hasta")
-        _col(c, x_np,     yy, "# Parts.")
-        _col(c, x_vn,     yy, "VN (€)")
+    x_fecha = MARG_X
+    x_tipo  = x_fecha + w_fecha + gap
+    x_nro   = x_tipo  + w_tipo  + gap
+    x_rng   = x_nro   + w_nro   + gap
+    x_qty   = x_rng   + w_rng   + gap
+    x_vn    = x_qty   + w_qty   + gap
+    x_cp    = x_vn    + w_vn    + gap
+    w_cp    = (MARG_X + content_w) - x_cp
+
+    def _wrap(text: str, max_w: float, font="DejaVuSans", size=8.6, max_lines: int = 2) -> list[str]:
+        t = (text or "").strip()
+        if not t:
+            return [""]
+        words, lines, cur = t.split(), [], ""
+        for w in words:
+            trial = (cur + " " + w).strip()
+            if pdfmetrics.stringWidth(trial, font, size) <= max_w:
+                cur = trial
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+            if len(lines) >= max_lines:
+                break
+        if cur:
+            lines.append(cur)
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+        if len(lines[-1]) > 3:
+            while pdfmetrics.stringWidth(lines[-1] + " …", font, size) > max_w and len(lines[-1]) > 3:
+                lines[-1] = lines[-1][:-1]
+            lines[-1] += " …"
+        return lines
+
+    def draw_header(yy: float) -> float:
+        _col(c, x_fecha, yy, "Fecha")
+        _col(c, x_tipo,  yy, "Tipo")
+        _col(c, x_nro,   yy, "Nº")
+        _col(c, x_rng,   yy, "RD–RH")
+        _col(c, x_qty,   yy, "# Parts.")
+        _col(c, x_vn,    yy, "VN (€)")
+        _col(c, x_cp,    yy, "Contraparte")
         y1 = yy - 4 * mm
-        _hr(c, y1); return y1 - 3 * mm
+        _hr(c, y1)
+        return y1 - 3 * mm
 
-    y = hdr(y)
-    c.setFont("DejaVuSans", 8.7)
+    y = draw_header(y)
+    c.setFont("DejaVuSans", 8.6)
 
-    if hist.empty:
-        _col(c, MARGIN_X, y, "(No hay asientos en el periodo)"); y -= CONTENT_GAP
+    if df.empty:
+        _col(c, MARG_X, y, "(No hay asientos en el periodo)")
+        y -= 6 * mm
     else:
-        for _, r in hist.iterrows():
-            if y < 25 * mm:
-                c.showPage(); y = H - 20 * mm
-                y = _section_title(c, "Asientos que afectan al socio", y)
-                y = hdr(y); c.setFont("DejaVuSans", 8.7)
+        for _, r in df.iterrows():
+            # saltar de página si no cabe la fila
+            if y < (MARG_Y + 22 * mm):
+                c.showPage()
+                y = H - MARG_Y
+                c.setFont("DejaVuSans-Bold", 13)
+                _col(c, MARG_X, y, "Certificado histórico del socio (continuación)"); y -= 6 * mm
+                _hr(c, y); y -= 6 * mm
+                c.setFont("DejaVuSans-Bold", 9.2)
+                y = draw_header(y)
+                c.setFont("DejaVuSans", 8.6)
 
             fecha = str(r.get("fecha") or "")
             tipo  = str(r.get("tipo") or "")
-            nro   = "" if pd.isna(r.get("correlativo")) else str(int(r.get("correlativo")))
-            cp    = _counterparty(r)
-            rd    = "" if pd.isna(r.get("rango_desde")) else str(int(r.get("rango_desde")))
-            rh    = "" if pd.isna(r.get("rango_hasta")) else str(int(r.get("rango_hasta")))
-            np    = _parts(r)
-            vn    = r.get("vn_vigente")
-            vn_txt = "" if vn in (None, float("nan")) else f"{float(vn):,.2f}".replace(",", ".")
+            # Nº asiento (si existe)
+            nro = ""
+            try:
+                v = r.get("correlativo")
+                if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                    nro = str(int(v))
+            except Exception:
+                nro = ""
 
-            _col(c, x_fecha,  y, fecha)
-            _col(c, x_tipo,   y, tipo)
-            _col(c, x_asiento,y, nro)
-            _col(c, x_cp,     y, cp, maxw=(x_rd - x_cp - 3*mm))
-            c.drawRightString(x_rd + 18*mm - 1.5*mm, y, rd)
-            c.drawRightString(x_rh + 18*mm - 1.5*mm, y, rh)
-            c.drawRightString(x_np + 20*mm - 1.5*mm, y, np)
-            c.drawRightString(x_vn + 22*mm - 1.5*mm, y, (vn_txt or "–"))
+            rng_txt = _range_txt(r)
+            qty_txt = _qty_txt(r)
 
-            y -= 4.8 * mm
+            vn = r.get("vn_vigente")
+            vn_txt = ""
+            try:
+                if vn is not None and not (isinstance(vn, float) and pd.isna(vn)):
+                    vn_txt = f"{float(vn):,.2f}".replace(",", ".")
+            except Exception:
+                vn_txt = ""
 
-    # Nota legal breve
+            cp_txt = _counterparty(r)
+            cp_lines = _wrap(cp_txt, w_cp)
+
+            # Dibujo de fila (multi-línea en "Contraparte")
+            line_h = 4.8 * mm
+            row_h = max(line_h * len(cp_lines), line_h)
+
+            _col(c, x_fecha, y, fecha)
+            _col(c, x_tipo,  y, tipo)
+            c.drawRightString(x_nro + w_nro - 1.5*mm, y, nro or "")
+            _col(c, x_rng,   y, rng_txt or "")
+            c.drawRightString(x_qty + w_qty - 1.5*mm, y, qty_txt or "")
+            c.drawRightString(x_vn  + w_vn  - 1.5*mm, y, vn_txt or "–")
+
+            yy = y
+            for i, ln in enumerate(cp_lines):
+                _col(c, x_cp, yy, ln, maxw=w_cp)
+                yy -= line_h
+
+            y = y - row_h
+            c.setStrokeColor(colors.whitesmoke); c.setLineWidth(0.4)
+            c.line(MARG_X, y + 0.9 * mm, MARG_X + content_w, y + 0.9 * mm)
+            c.setStrokeColor(colors.black)
+
+    # Nota legal
     y -= 2 * mm
     txt = (
         "Este certificado se emite a efectos informativos, reflejando los asientos del Libro Registro "
         "que afectaron al socio en el periodo indicado. El valor nominal mostrado corresponde al vigente "
         "en cada fecha de asiento, salvo que en dicho asiento se hubiera modificado explícitamente."
     )
-    y = _draw_paragraph(c, txt, MARGIN_X, y, content_width, leading=11.0, font="DejaVuSans", font_size=8)
+    y = _draw_paragraph(c, txt, MARG_X, y, content_w, leading=11.0, font="DejaVuSans", font_size=8)
 
     c.showPage(); c.save()
     buf.seek(0)
     log.info("Export CertificadoHistorico.pdf company_id=%s partner_id=%s from=%s to=%s rows=%s",
-             company_id, partner_id, from_date, to_date, 0 if hist is None else len(hist))
+             company_id, partner_id, from_date, to_date, len(df))
     return buf

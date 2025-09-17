@@ -10,7 +10,7 @@ def list_companies() -> list[dict]:
     with get_connection() as conn:
         conn.row_factory = _dict_row_factory
         cur = conn.execute("""
-            SELECT id, name, cif, domicilio, fecha_constitucion
+            SELECT id, name, cif, domicilio, fecha_constitucion, valor_nominal, participaciones_totales
             FROM companies
             ORDER BY id
         """)
@@ -20,30 +20,50 @@ def get_company(company_id: int) -> Optional[dict]:
     with get_connection() as conn:
         conn.row_factory = _dict_row_factory
         cur = conn.execute("""
-            SELECT id, name, cif, domicilio, fecha_constitucion
+            SELECT id, name, cif, domicilio, fecha_constitucion, valor_nominal, participaciones_totales
             FROM companies
             WHERE id = ?
         """, (company_id,))
         row = cur.fetchone()
         return row if row else None
 
-def insert_company(*, name: str, cif: str,
-                   domicilio: Optional[str], fecha_constitucion: Optional[str]) -> int:
+def insert_company(
+    *,
+    name: str,
+    cif: str,
+    domicilio: Optional[str],
+    fecha_constitucion: Optional[str],
+    valor_nominal: float,
+    participaciones_totales: int,
+) -> int:
     with get_connection() as conn:
         cur = conn.execute("""
-            INSERT INTO companies(name, cif, domicilio, fecha_constitucion)
-            VALUES (?, ?, ?, ?)
-        """, (name.strip(), cif.strip(), domicilio, fecha_constitucion))
+            INSERT INTO companies(name, cif, domicilio, fecha_constitucion, valor_nominal, participaciones_totales)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (name.strip(), cif.strip(), domicilio, fecha_constitucion, float(valor_nominal), int(participaciones_totales)))
         return cur.lastrowid
 
-def update_company(*, id: int, name: str, cif: str,
-                   domicilio: Optional[str], fecha_constitucion: Optional[str]) -> None:
+def update_company(
+    *,
+    id: int,
+    name: str,
+    cif: str,
+    domicilio: Optional[str],
+    fecha_constitucion: Optional[str],
+    valor_nominal: float,
+    participaciones_totales: int,
+) -> None:
     with get_connection() as conn:
         conn.execute("""
             UPDATE companies
-               SET name = ?, cif = ?, domicilio = ?, fecha_constitucion = ?
+               SET name = ?,
+                   cif = ?,
+                   domicilio = ?,
+                   fecha_constitucion = ?,
+                   valor_nominal = ?,
+                   participaciones_totales = ?
              WHERE id = ?
-        """, (name.strip(), cif.strip(), domicilio, fecha_constitucion, id))
+        """, (name.strip(), cif.strip(), domicilio, fecha_constitucion, float(valor_nominal), int(participaciones_totales), id))
 
 def delete_company(company_id: int) -> None:
     with get_connection() as conn:

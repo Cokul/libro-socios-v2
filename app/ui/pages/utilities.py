@@ -336,7 +336,7 @@ def render(company_id: int | None = None):
 
         col_opt1, col_opt2, col_opt3 = st.columns(3)
         with col_opt1:
-            fix_name = st.checkbox("Corregir nombres", value=True)
+            fix_names = st.checkbox("Corregir nombres", value=True)  # <- renombrado
         with col_opt2:
             fix_nif = st.checkbox("Corregir NIF/NIE/CIF", value=True)
         with col_opt3:
@@ -347,8 +347,12 @@ def render(company_id: int | None = None):
             try:
                 res = run_normalization(
                     company_id=selected_company,
-                    scope=scope, fix_name=fix_name, fix_nif=fix_nif,
-                    remove_accents=remove_accents, dry_run=dry, sample_limit=30
+                    scope=scope,
+                    fix_names=fix_names,          # <- actualizado
+                    fix_nif=fix_nif,
+                    remove_accents=remove_accents,
+                    dry_run=dry,
+                    sample_limit=30,
                 )
                 st.success("Normalización simulada." if dry else "Normalización aplicada.")
                 st.json({

@@ -1,5 +1,4 @@
 # app/ui/pages/governance.py
-
 from __future__ import annotations
 
 import streamlit as st
@@ -14,19 +13,53 @@ from app.core.services.governance_service import (
 from app.core.enums import GOVERNANCE_ROLES
 
 
-def _reset_form_state():
-    st.session_state["gov_member_id"] = 0
-    st.session_state["gov_nombre"] = ""
-    st.session_state["gov_cargo_sel"] = GOVERNANCE_ROLES[0] if GOVERNANCE_ROLES else "Administrador Único"
-    st.session_state["gov_cargo_custom"] = ""
-    st.session_state["gov_nif"] = ""
-    st.session_state["gov_direccion"] = ""
-    st.session_state["gov_telefono"] = ""
-    st.session_state["gov_email"] = ""
+def _prime_defaults():
+    """Inicializa claves si no existen (no pisa valores ya establecidos)."""
+    st.session_state.setdefault("gov_member_id", 0)
+    st.session_state.setdefault("gov_nombre", "")
+    st.session_state.setdefault(
+        "gov_cargo_sel",
+        GOVERNANCE_ROLES[0] if GOVERNANCE_ROLES else "Administrador Único",
+    )
+    st.session_state.setdefault("gov_cargo_custom", "")
+    st.session_state.setdefault("gov_nif", "")
+    st.session_state.setdefault("gov_direccion", "")
+    st.session_state.setdefault("gov_telefono", "")
+    st.session_state.setdefault("gov_email", "")
+
+
+def _schedule_form_reset():
+    """Marca para resetear y fuerza rerun. El borrado real ocurre al inicio del render."""
+    st.session_state["gov_form_reset"] = True
+    st.rerun()
+
+
+def _apply_reset_if_needed():
+    """
+    Si hay bandera de reset, elimina las claves ANTES de instanciar widgets.
+    Eliminar (pop) es seguro; reasignar tras instanciar no lo es.
+    """
+    if st.session_state.get("gov_form_reset"):
+        for k in (
+            "gov_member_id",
+            "gov_nombre",
+            "gov_cargo_sel",
+            "gov_cargo_custom",
+            "gov_nif",
+            "gov_direccion",
+            "gov_telefono",
+            "gov_email",
+        ):
+            st.session_state.pop(k, None)
+        st.session_state["gov_form_reset"] = False
 
 
 def render(company_id: int):
     st.subheader("Gobernanza (Consejo)")
+
+    # === Reset seguro ANTES de cualquier widget ===
+    _apply_reset_if_needed()
+    _prime_defaults()
 
     # Acción rápida de recompute para esta sociedad
     col_a, col_b = st.columns([1, 3])
@@ -52,7 +85,17 @@ def render(company_id: int):
         df = df.rename(columns={"board_no": "Nº consejero"})
         # Orden visual por correlativo si existe
         df = df.sort_values(by=["Nº consejero", "nombre"], na_position="last")
-        cols = ["Nº consejero", "id", "company_id", "nombre", "cargo", "nif", "direccion", "telefono", "email"]
+        cols = [
+            "Nº consejero",
+            "id",
+            "company_id",
+            "nombre",
+            "cargo",
+            "nif",
+            "direccion",
+            "telefono",
+            "email",
+        ]
         df = df[[c for c in cols if c in df.columns]]
     st.dataframe(df, width="stretch", hide_index=True)
 
@@ -66,56 +109,48 @@ def render(company_id: int):
 
     # ---- Formulario de alta/edición ----
     with st.expander("➕ Alta / edición de consejero", expanded=True):
-        if "gov_member_id" not in st.session_state:
-            _reset_form_state()
-
         col1, col2 = st.columns(2)
         with col1:
-            member_id = st.number_input("ID (0 para alta)", min_value=0, step=1, value=int(st.session_state.get("gov_member_id", 0)), key="gov_member_id")
-            nombre = st.text_input("Nombre", value=st.session_state.get("gov_nombre", ""), key="gov_nombre")
+            # Widgets SIN 'value='; usan Session State vía 'key'
+            st.number_input("ID (0 para alta)", min_value=0, step=1, key="gov_member_id")
+            st.text_input("Nombre", key="gov_nombre")
 
             opciones = GOVERNANCE_ROLES + ["Otro…"]
-            cargo_sel = st.selectbox(
-                "Cargo / Rol",
-                opciones,
-                index=opciones.index(st.session_state.get("gov_cargo_sel", opciones[0])) if st.session_state.get("gov_cargo_sel") in opciones else 0,
-                key="gov_cargo_sel"
-            )
-            cargo_custom = ""
-            if cargo_sel == "Otro…":
-                cargo_custom = st.text_input("Especifica el rol", value=st.session_state.get("gov_cargo_custom", ""), placeholder="p. ej. Vocal", key="gov_cargo_custom")
+            st.selectbox("Cargo / Rol", opciones, key="gov_cargo_sel")
+            if st.session_state.get("gov_cargo_sel") == "Otro…":
+                st.text_input("Especifica el rol", placeholder="p. ej. Vocal", key="gov_cargo_custom")
 
-            nif = st.text_input("NIF/NIE", value=st.session_state.get("gov_nif", ""), key="gov_nif")
+            st.text_input("NIF/NIE", key="gov_nif")
 
         with col2:
-            direccion = st.text_input("Dirección", value=st.session_state.get("gov_direccion", ""), key="gov_direccion")
-            telefono = st.text_input("Teléfono", value=st.session_state.get("gov_telefono", ""), key="gov_telefono")
-            email = st.text_input("Email", value=st.session_state.get("gov_email", ""), key="gov_email")
+            st.text_input("Dirección", key="gov_direccion")
+            st.text_input("Teléfono", key="gov_telefono")
+            st.text_input("Email", key="gov_email")
 
-        cargo_final = (cargo_custom.strip() if cargo_sel == "Otro…" else cargo_sel).strip()
+        cargo_sel = st.session_state.get("gov_cargo_sel")
+        cargo_custom = st.session_state.get("gov_cargo_custom", "")
+        cargo_final = (cargo_custom.strip() if cargo_sel == "Otro…" else str(cargo_sel)).strip()
 
         b1, b2 = st.columns(2)
         with b1:
             if st.button("💾 Guardar consejero", use_container_width=True):
                 try:
-                    fid = int(member_id) if member_id else None
+                    fid = int(st.session_state.get("gov_member_id") or 0) or None
                     new_id = save_board_member(
                         id=fid,
                         company_id=company_id,
-                        nombre=nombre.strip(),
+                        nombre=st.session_state.get("gov_nombre", "").strip(),
                         cargo=cargo_final,
-                        nif=nif.strip(),
-                        direccion=(direccion or None),
-                        telefono=(telefono or None),
-                        email=(email or None),
+                        nif=st.session_state.get("gov_nif", "").strip(),
+                        direccion=(st.session_state.get("gov_direccion") or None),
+                        telefono=(st.session_state.get("gov_telefono") or None),
+                        email=(st.session_state.get("gov_email") or None),
                     )
                     st.success(f"Guardado consejero ID {new_id}")
-                    _reset_form_state()
-                    st.rerun()
+                    _schedule_form_reset()  # marcar reset + rerun (no tocar session_state ahora)
                 except Exception as e:
                     st.error(str(e))
 
         with b2:
             if st.button("🧹 Limpiar formulario", use_container_width=True):
-                _reset_form_state()
-                st.rerun()
+                _schedule_form_reset()  # marcar reset + rerun

@@ -13,6 +13,8 @@ log = logging.getLogger(__name__)
 
 MIN_CO_DATE = date(1900, 1, 1)   # soporta sociedades antiguas
 MAX_CO_DATE = date.today()
+DEFAULT_VALOR_NOMINAL = 1.00
+DEFAULT_PART_TOTALES = 1
 
 def _to_date_or_none(s: str | None) -> date | None:
     if not s:
@@ -22,48 +24,73 @@ def _to_date_or_none(s: str | None) -> date | None:
     except Exception:
         return None
 
-def _clear_form_state():
+def _prime_defaults():
+    """Solo establece valores por defecto si no existen aún (no pisa valores)."""
     st.session_state.setdefault("co_id", 0)
-    st.session_state["co_name"] = ""
-    st.session_state["co_cif"] = ""
-    st.session_state["co_dom"] = ""
-    st.session_state["co_fec"] = None
+    st.session_state.setdefault("co_name", "")
+    st.session_state.setdefault("co_cif", "")
+    st.session_state.setdefault("co_dom", "")
+    st.session_state.setdefault("co_fec", None)
+    st.session_state.setdefault("co_vnom", DEFAULT_VALOR_NOMINAL)
+    st.session_state.setdefault("co_ptot", DEFAULT_PART_TOTALES)
+
+def _schedule_form_reset():
+    """Marca reset y fuerza rerender. El borrado real ocurre al inicio del render."""
+    st.session_state["co_form_reset"] = True
+    st.rerun()
+
+def _apply_reset_if_needed():
+    """
+    Si hay bandera de reset, elimina las claves ANTES de instanciar widgets.
+    Eliminar (pop) es seguro; reasignar después de instanciar no lo es.
+    """
+    if st.session_state.get("co_form_reset"):
+        for k in ("co_id", "co_name", "co_cif", "co_dom", "co_fec", "co_vnom", "co_ptot"):
+            st.session_state.pop(k, None)
+        st.session_state["co_form_reset"] = False
 
 def render(company_id: int | None):
     st.subheader("Sociedades")
-    
-    # --- resets/prefills antes de instanciar widgets ---
-    if st.session_state.get("co_form_reset", False):
-        for k, v in (("co_id", 0), ("co_name", ""), ("co_cif", ""), ("co_dom", ""), ("co_fec", None)):
-            st.session_state[k] = v
-        st.session_state["co_form_reset"] = False
+
+    # --- aplicar reset si está programado (antes de cualquier widget) ---
+    _apply_reset_if_needed()
+    # --- inyectar defaults si faltan (no pisa existentes) ---
+    _prime_defaults()
 
     # Listado
     rows = list_companies()
-    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["id","name","cif","domicilio","fecha_constitucion"])
+    df = pd.DataFrame(rows) if rows else pd.DataFrame(
+        columns=["id","name","cif","domicilio","fecha_constitucion","valor_nominal","participaciones_totales"]
+    )
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     st.markdown("---")
     with st.expander("➕ Alta / edición de sociedad", expanded=True):
-        # Estado inicial del formulario
-        if "co_name" not in st.session_state:
-            _clear_form_state()
 
         # Fila superior: ID + Cargar datos
         col_id, col_btn = st.columns([1,1])
         with col_id:
-            cid_input = st.number_input(
-                "ID (0 para alta)", min_value=0, step=1, key="co_id"
-            )
+            st.number_input("ID (0 para alta)", min_value=0, step=1, key="co_id")
         with col_btn:
             if st.button("🔎 Cargar datos"):
-                if cid_input and cid_input > 0:
-                    row = get_company(int(cid_input))
+                cid_input = int(st.session_state.get("co_id") or 0)
+                if cid_input > 0:
+                    row = get_company(cid_input)
                     if row:
+                        # Cargamos en session_state ANTES de widgets (estamos aún en el mismo render;
+                        # pero estos keys todavía no han instanciado widget en este bloque, es seguro)
                         st.session_state["co_name"] = row.get("name") or ""
                         st.session_state["co_cif"]  = row.get("cif") or ""
                         st.session_state["co_dom"]  = row.get("domicilio") or ""
                         st.session_state["co_fec"]  = _to_date_or_none(row.get("fecha_constitucion"))
+                        try:
+                            st.session_state["co_vnom"] = float(row.get("valor_nominal")) if row.get("valor_nominal") is not None else DEFAULT_VALOR_NOMINAL
+                        except Exception:
+                            st.session_state["co_vnom"] = DEFAULT_VALOR_NOMINAL
+                        try:
+                            st.session_state["co_ptot"] = int(row.get("participaciones_totales")) if row.get("participaciones_totales") is not None else DEFAULT_PART_TOTALES
+                        except Exception:
+                            st.session_state["co_ptot"] = DEFAULT_PART_TOTALES
                         st.success(f"Cargada sociedad ID {cid_input}.")
                     else:
                         st.warning(f"No se encontró la sociedad ID {cid_input}.")
@@ -71,17 +98,27 @@ def render(company_id: int | None):
                     st.info("Introduce un ID > 0 para cargar.")
                 st.rerun()
 
-        # Campos principales (pre-rellenados desde session_state)
+        # Campos principales (solo key; sin value para no colisionar con session_state)
         col1, col2 = st.columns(2)
         with col1:
-            name = st.text_input("Nombre", value=st.session_state.get("co_name",""), key="co_name")
-            domicilio = st.text_input("Domicilio", value=st.session_state.get("co_dom",""), key="co_dom")
+            st.text_input("Nombre", key="co_name", placeholder="Nombre de la sociedad")
+            st.text_input("Domicilio", key="co_dom", placeholder="Calle, número, ciudad…")
+            st.number_input(
+                "Valor nominal (€/participación)",
+                min_value=0.0001, step=0.01, format="%.2f",
+                key="co_vnom"
+            )
         with col2:
-            cif = st.text_input("CIF/NIF", value=st.session_state.get("co_cif",""), key="co_cif")
-            fec = st.date_input(
+            st.text_input("CIF/NIF", key="co_cif", placeholder="A12345678 / 12345678Z")
+            st.date_input(
                 "Fecha constitución",
                 min_value=MIN_CO_DATE, max_value=MAX_CO_DATE,
                 format="YYYY-MM-DD", key="co_fec"
+            )
+            st.number_input(
+                "Participaciones totales",
+                min_value=1, step=1,
+                key="co_ptot"
             )
 
         # Botonera
@@ -94,22 +131,24 @@ def render(company_id: int | None):
                     name=st.session_state.get("co_name","").strip(),
                     cif=st.session_state.get("co_cif","").strip(),
                     domicilio=(st.session_state.get("co_dom","").strip() or None),
-                    fecha_constitucion=fec_txt
+                    fecha_constitucion=fec_txt,
+                    valor_nominal=float(st.session_state.get("co_vnom", DEFAULT_VALOR_NOMINAL)),
+                    participaciones_totales=int(st.session_state.get("co_ptot", DEFAULT_PART_TOTALES)),
                 )
                 log.info("UI save company id=%s", new_id)
                 st.success(f"Sociedad guardada (ID {new_id}).")
-                _clear_form_state()
-                st.rerun()
+                _schedule_form_reset()  # <-- marcar reset + rerun (no tocar session_state ahora)
+
         with cB:
-            if st.button("🗑️ Eliminar", disabled=(int(st.session_state.get("co_id",0)) == 0)):
+            disabled_del = (int(st.session_state.get("co_id",0)) == 0)
+            if st.button("🗑️ Eliminar", disabled=disabled_del):
                 delete_company(int(st.session_state["co_id"]))
                 log.warning("UI delete company id=%s", int(st.session_state["co_id"]))
                 st.success(f"Sociedad {int(st.session_state['co_id'])} eliminada.")
-                _clear_form_state()
-                st.rerun()
+                _schedule_form_reset()  # <-- marcar reset + rerun
+
         with cC:
             if st.button("🧹 Limpiar formulario"):
-                st.session_state["co_form_reset"] = True
-                st.rerun()
+                _schedule_form_reset()  # <-- marcar reset + rerun
 
     st.caption("Esta pantalla usa la capa de servicios/repos para leer y persistir 'companies'.")
