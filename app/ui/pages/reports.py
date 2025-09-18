@@ -96,7 +96,7 @@ def render(company_id: int | None = None):
                 "pct": "%"
             }, inplace=True)
             cols = [c for c in ["Nº socio", "Socio", "NIF", "Clase", "Participaciones", "Capital socio (€)", "%"] if c in df.columns]
-            st.dataframe(df[cols], hide_index=True, use_container_width=True)
+            st.dataframe(df[cols], hide_index=True, width="stretch")
         else:
             st.dataframe(
                 df.rename(columns={
@@ -109,7 +109,7 @@ def render(company_id: int | None = None):
                     "pct": "%"
                 }),
                 hide_index=True,
-                use_container_width=True
+                width="stretch"
             )
 
         # --- Filtros para el LIBRO ---
@@ -137,7 +137,7 @@ def render(company_id: int | None = None):
                     data=xls.getvalue(),
                     file_name=f"cap_table_{company_id}_{as_of_global}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                    width="stretch"
                 )
         with c2:
             if st.button("⤵️ Libro (PDF legalizable)", key="rep_cap_export_pdf_ledger"):
@@ -155,7 +155,7 @@ def render(company_id: int | None = None):
                     data=pdf.getvalue(),
                     file_name=f"libro_registro_{company_id}.pdf",
                     mime="application/pdf",
-                    use_container_width=True
+                    width="stretch"
                 )
         with c3:
             if st.button("⤵️ Libro (Excel legalizable)", key="rep_cap_export_xlsx_ledger"):
@@ -173,7 +173,7 @@ def render(company_id: int | None = None):
                     data=xls_leg.getvalue(),
                     file_name=f"libro_registro_{company_id}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                    width="stretch"
                 )
 
     # --------------------------------------------------------
@@ -232,7 +232,7 @@ def render(company_id: int | None = None):
                         "participaciones": "Participaciones"
                     }),
                     hide_index=True,
-                    use_container_width=True
+                    width="stretch"
                 )
                 total_bloques = int(rangos["participaciones"].sum())
                 st.caption(f"Suma de bloques: {total_bloques} • Total socio: {int(pos.get('shares',0))}")
@@ -319,7 +319,7 @@ def render(company_id: int | None = None):
                     cols.append(c)
                     seen.add(c)
 
-            st.dataframe(dfm[cols], hide_index=True, use_container_width=True)
+            st.dataframe(dfm[cols], hide_index=True, width="stretch")
 
             c1, _ = st.columns(2)
             with c1:
@@ -330,7 +330,7 @@ def render(company_id: int | None = None):
                         data=xls.getvalue(),
                         file_name=f"movimientos_{company_id}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
+                        width="stretch"
                     )
 
     # --------------------------------------------------------
@@ -384,7 +384,7 @@ def render(company_id: int | None = None):
                         data=pdf.getvalue(),
                         file_name=f"certificado_partner_{partner_id}_{as_of_global}.pdf",
                         mime="application/pdf",
-                        use_container_width=True
+                        width="stretch"
                     )
 
         # === Certificado histórico (trayectoria socio en PDF) ===
@@ -406,7 +406,7 @@ def render(company_id: int | None = None):
                 with c2:
                     d_to = st.date_input("Hasta (opcional)", value=None, format="YYYY-MM-DD", key="hist_to")
 
-                if st.button("🖨️ Generar PDF", use_container_width=True, key="btn_hist_pdf"):
+                if st.button("🖨️ Generar PDF", key="btn_hist_pdf", width="stretch"):
                     try:
                         pdf = export_partner_history_pdf(
                             company_id=company_id,
@@ -420,7 +420,7 @@ def render(company_id: int | None = None):
                             data=pdf.getvalue(),
                             file_name=f"certificado_historico_partner_{pid}.pdf",
                             mime="application/pdf",
-                            use_container_width=True
+                            width="stretch"
                         )
                     except Exception as e:
                         st.error(f"Error generando el PDF: {e}")
@@ -438,10 +438,7 @@ def render(company_id: int | None = None):
             st.subheader("Participaciones acumuladas")
             tl_plot = tl.copy()
             tl_plot["date"] = pd.to_datetime(tl_plot["date"])
-            st.line_chart(
-                tl_plot.set_index("date")["total_shares_acum"],
-                use_container_width=True
-            )
+            st.line_chart(tl_plot.set_index("date")["total_shares_acum"])
 
         st.divider()
 
@@ -452,10 +449,7 @@ def render(company_id: int | None = None):
             st.subheader("Capital social (€)")
             cl_plot = cl.copy()
             cl_plot["date"] = pd.to_datetime(cl_plot["date"])
-            st.line_chart(
-                cl_plot.set_index("date")["capital_social"],
-                use_container_width=True
-            )
+            st.line_chart(cl_plot.set_index("date")["capital_social"])
 
 # Hook para routing
 def main():

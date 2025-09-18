@@ -133,7 +133,7 @@ def render(company_id: int):
 
         b1, b2 = st.columns(2)
         with b1:
-            if st.button("💾 Guardar consejero", use_container_width=True):
+            if st.button("💾 Guardar consejero", width='stretch'):
                 try:
                     fid = int(st.session_state.get("gov_member_id") or 0) or None
                     new_id = save_board_member(
@@ -152,5 +152,5 @@ def render(company_id: int):
                     st.error(str(e))
 
         with b2:
-            if st.button("🧹 Limpiar formulario", use_container_width=True):
+            if st.button("🧹 Limpiar formulario", width='stretch'):
                 _schedule_form_reset()  # marcar reset + rerun
