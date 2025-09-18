@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 import pandas as pd
 import streamlit as st
 
-# Usamos SOLO commit del backend (tu lógica actual). Nada de dry-run ni helpers antiguos.
+# Usamos SOLO commit del backend (tu lógica actual)
 from app.core.services.import_service import commit  # type: ignore
 
 log = logging.getLogger(__name__)
@@ -114,6 +114,7 @@ def _read_any(upload) -> pd.DataFrame:
     return df.fillna("")
 
 def _only_allowed(df: pd.DataFrame, allowed: List[str]) -> pd.DataFrame:
+    """Devuelve solo las columnas permitidas, creando en blanco las que falten y en el orden oficial."""
     cols_present = [c for c in df.columns if c in allowed]
     d = df[cols_present].copy()
     # crea vacías para las que falten
@@ -135,12 +136,44 @@ def _download_xlsx(filename: str, data: List[Dict[str, Any]], columns: List[str]
         data=buf.getvalue(),
         file_name=filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        width="stretch",
     )
 
+# ---- Limpiezas de tipado/valor --------------------------------
+def _as_string_clean(v) -> str:
+    """Texto robusto:
+    - bytes -> utf-8
+    - None/'none'/'nan'/'nat' -> ''
+    - strip()
+    """
+    if isinstance(v, (bytes, bytearray)):
+        try:
+            v = v.decode("utf-8", "ignore")
+        except Exception:
+            v = str(v)
+    if v is None:
+        return ""
+    s = str(v).strip()
+    if s.lower() in {"none", "nan", "nat"}:
+        return ""
+    return s
+
+def _to_date_iso_or_blank(v) -> str:
+    """Convierte a fecha ISO YYYY-MM-DD o ''."""
+    s = _as_string_clean(v)
+    if s == "":
+        return ""
+    try:
+        dt = pd.to_datetime(s, errors="coerce")
+        if pd.isna(dt):
+            return ""
+        return pd.to_datetime(dt).date().isoformat()
+    except Exception:
+        return ""
+
 def _to_int_or_blank(v) -> str:
-    s = ("" if v is None else str(v)).strip()
-    if s == "" or s.lower() == "none":
+    s = _as_string_clean(v)
+    if s == "":
         return ""
     try:
         return str(int(float(s.replace(",", "."))))
@@ -148,8 +181,8 @@ def _to_int_or_blank(v) -> str:
         return ""  # deja vacío si no es interpretable
 
 def _to_float_or_blank(v) -> str:
-    s = ("" if v is None else str(v)).strip()
-    if s == "" or s.lower() == "none":
+    s = _as_string_clean(v)
+    if s == "":
         return ""
     try:
         return f"{float(s.replace(',', '.')):.2f}"
@@ -242,7 +275,7 @@ def render(company_id: int):
         st.info("Selecciona un archivo para continuar.")
         return
 
-    # ==== Lectura + normalización ====
+    # ==== Lectura + normalización de encabezados/columnas ====
     try:
         df_raw = _read_any(up)
         df_norm = _normalize_headers(df_raw)
@@ -253,36 +286,47 @@ def render(company_id: int):
         st.error(f"No se pudo leer el archivo: {e}")
         return
 
-    # Limpieza suave de tipos para evitar errores de inserción
+    # ==== Limpieza de tipos para evitar errores en BD y al pintar ====
     if kind == "partners":
-        # partner_no debe ser entero o vacío
-        df["partner_no"] = df["partner_no"].map(_to_int_or_blank)
-        # trims de texto
-        for c in ["nombre", "nif", "domicilio", "tipo", "nacionalidad", "fecha_nacimiento_constitucion"]:
-            df[c] = df[c].astype(str).fillna("").str.strip()
+        # Texto limpio
+        for c in ["nombre", "nif", "domicilio", "nacionalidad"]:
+            if c in df.columns:
+                df[c] = df[c].map(_as_string_clean).astype(str)
+        # Nº socio entero (como texto) o vacío
+        if "partner_no" in df.columns:
+            df["partner_no"] = df["partner_no"].map(_to_int_or_blank)
+        # Fecha nacimiento/constitución en ISO (texto) o vacío
+        if "fecha_nacimiento_constitucion" in df.columns:
+            df["fecha_nacimiento_constitucion"] = df["fecha_nacimiento_constitucion"].map(_to_date_iso_or_blank)
     else:
-        # ids / rangos como enteros o vacío
+        # Fecha ISO (texto) o vacío
+        if "fecha" in df.columns:
+            df["fecha"] = df["fecha"].map(_to_date_iso_or_blank)
+        # IDs y rangos como enteros (texto) o vacío
         for c in ["socio_transmite", "socio_adquiere", "rango_desde", "rango_hasta"]:
-            df[c] = df[c].map(_to_int_or_blank)
-        # VN a float con 2 decimales o vacío
-        df["nuevo_valor_nominal"] = df["nuevo_valor_nominal"].map(_to_float_or_blank)
-        # trims
-        for c in ["fecha", "tipo", "documento", "observaciones"]:
-            df[c] = df[c].astype(str).fillna("").str.strip()
+            if c in df.columns:
+                df[c] = df[c].map(_to_int_or_blank)
+        # VN a decimal con 2 (texto) o vacío
+        if "nuevo_valor_nominal" in df.columns:
+            df["nuevo_valor_nominal"] = df["nuevo_valor_nominal"].map(_to_float_or_blank)
+        # Texto limpio resto
+        for c in ["tipo", "documento", "observaciones"]:
+            if c in df.columns:
+                df[c] = df[c].map(_as_string_clean).astype(str)
 
     # ==== Validación mínima ====
     errs: List[str] = []
     if kind == "partners":
         if df.empty:
             errs.append("El archivo no contiene filas.")
-        if df["nombre"].astype(str).str.strip().eq("").all():
+        if df["nombre"].map(_as_string_clean).eq("").all():
             errs.append("Todas las filas tienen 'nombre' vacío.")
     else:
         if df.empty:
             errs.append("El archivo no contiene filas.")
-        if "fecha" in df.columns and df["fecha"].astype(str).str.strip().eq("").any():
+        if "fecha" in df.columns and df["fecha"].map(_as_string_clean).eq("").any():
             errs.append("Hay filas de events con 'fecha' vacía.")
-        if "tipo" in df.columns and df["tipo"].astype(str).str.strip().eq("").any():
+        if "tipo" in df.columns and df["tipo"].map(_as_string_clean).eq("").any():
             errs.append("Hay filas de events con 'tipo' vacío.")
 
     if errs:
@@ -293,11 +337,11 @@ def render(company_id: int):
 
     # ==== Previsualización ====
     st.success(f"Archivo leído correctamente. Filas detectadas: {len(df)}")
-    st.dataframe(df.head(MAX_PREVIEW_ROWS), use_container_width=True, hide_index=True)
+    st.dataframe(df.head(MAX_PREVIEW_ROWS), width="stretch", hide_index=True)
 
     # ==== Commit ====
     label = "✅ Importar partners" if kind == "partners" else "✅ Importar events"
-    if st.button(label, use_container_width=True, key=f"btn_commit_{kind}"):
+    if st.button(label, width="stretch", key=f"btn_commit_{kind}"):
         try:
             rows_ok = df.to_dict(orient="records")
             summary = commit(kind, company_id, rows_ok)  # tu backend hace la transacción

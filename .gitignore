@@ -32,3 +32,14 @@ _review_correlativos/
 migrations/
 CODEBUNDLE.txt
 TREEMAP.txt
+# Artifacts locales
+*.db
+*.sqlite
+*.sqlite3
+/data/
+*.xlsx
+*.xls
+*.csv
+__pycache__/
+*.pyc
+.streamlit/

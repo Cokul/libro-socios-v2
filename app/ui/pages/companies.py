@@ -62,7 +62,7 @@ def render(company_id: int | None):
     df = pd.DataFrame(rows) if rows else pd.DataFrame(
         columns=["id","name","cif","domicilio","fecha_constitucion","valor_nominal","participaciones_totales"]
     )
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width='stretch', hide_index=True)
 
     st.markdown("---")
     with st.expander("➕ Alta / edición de sociedad", expanded=True):

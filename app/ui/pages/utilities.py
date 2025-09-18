@@ -36,7 +36,7 @@ def render(company_id: int | None = None):
         "🩺 Salud BD",
         "🧹 Mantenimiento",
         "📜 Logs",
-        "📥 Importar CSV",
+        "📥 Importar Datos",
         "🧽 Normalización",
     ])
 
@@ -49,7 +49,7 @@ def render(company_id: int | None = None):
         with colA:
             with st.form("form_create_backup", clear_on_submit=False):
                 st.caption("Crea una copia de la base de datos actual en `data/backups/`.")
-                submit = st.form_submit_button("🧩 Crear backup ahora", use_container_width=True)
+                submit = st.form_submit_button("🧩 Crear backup ahora", width='stretch')
                 if submit:
                     try:
                         with st.status("Creando backup…", expanded=True) as status:
@@ -81,7 +81,7 @@ def render(company_id: int | None = None):
                         do_restore = st.form_submit_button(
                             "⚠️ Restaurar seleccionado",
                             disabled=(confirm != "RESTAURAR"),
-                            use_container_width=True
+                            width='stretch'
                         )
 
                     if down:
@@ -93,7 +93,7 @@ def render(company_id: int | None = None):
                                     data=f.read(),
                                     file_name=picked.name,
                                     mime="application/octet-stream",
-                                    use_container_width=True
+                                    width='stretch'
                                 )
                         else:
                             st.error("El backup seleccionado ya no existe.")
@@ -115,7 +115,7 @@ def render(company_id: int | None = None):
         st.markdown("### Comprobaciones de integridad")
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("🔎 Comprobar integridad / FK", use_container_width=True, key="btn_check_both"):
+            if st.button("🔎 Comprobar integridad / FK", width='stretch', key="btn_check_both"):
                 with st.status("Ejecutando PRAGMA integrity_check y foreign_key_check…", expanded=True) as status:
                     summary = db_quick_summary()
                     status.update(label="Comprobaciones finalizadas ✅", state="complete")
@@ -128,7 +128,7 @@ def render(company_id: int | None = None):
 
         col3, col4, col5 = st.columns(3)
         with col3:
-            if st.button("Solo integrity_check", use_container_width=True, key="btn_integrity"):
+            if st.button("Solo integrity_check", width='stretch', key="btn_integrity"):
                 msgs = db_integrity_check()
                 if not msgs:
                     st.success("OK: integrity_check sin incidencias.")
@@ -136,7 +136,7 @@ def render(company_id: int | None = None):
                     st.error("PRAGMA integrity_check devolvió incidencias:")
                     st.code("\n".join(msgs) or "(sin detalles)")
         with col4:
-            if st.button("Solo foreign_key_check", use_container_width=True, key="btn_fk"):
+            if st.button("Solo foreign_key_check", width='stretch', key="btn_fk"):
                 fks = db_fk_check()
                 if not fks:
                     st.success("OK: foreign_key_check sin incidencias.")
@@ -172,7 +172,7 @@ def render(company_id: int | None = None):
         with c3:
             chk_govern = st.checkbox("Gobernanza (board_no)", value=True)
 
-        btn = st.button("↻ Recalcular correlativos", use_container_width=True)
+        btn = st.button("↻ Recalcular correlativos", width='stretch')
         if btn:
             if not any([chk_partners, chk_events, chk_govern]):
                 st.warning("Selecciona al menos un ámbito (Socios / Eventos / Gobernanza).")
@@ -204,7 +204,7 @@ def render(company_id: int | None = None):
                 "(opcionales) events(company_id, correlativo), board_members(company_id)"
             )
         with coli2:
-            if st.button("⚙️ Crear índices mínimos", use_container_width=True):
+            if st.button("⚙️ Crear índices mínimos", width='stretch'):
                 try:
                     out = ensure_min_indexes()
                     st.success("Índices verificados ✅")
@@ -225,7 +225,7 @@ def render(company_id: int | None = None):
             with colz:
                 do_vacuum = st.checkbox("VACUUM", value=False)
 
-            run = st.form_submit_button("▶️ Ejecutar selección", use_container_width=True)
+            run = st.form_submit_button("▶️ Ejecutar selección", width='stretch')
 
             if run:
                 if do_analyze:  run_analyze()
@@ -256,7 +256,7 @@ def render(company_id: int | None = None):
             with colD:
                 query = st.text_input("Buscar", value="", placeholder=("expresión regular" if regex_mode else "contiene…"), key="log_query")
 
-            submitted = st.form_submit_button("🔄 Mostrar / refrescar", use_container_width=True)
+            submitted = st.form_submit_button("🔄 Mostrar / refrescar", width='stretch')
 
         if submitted and LOG_FILE.exists():
             lines = _read_tail(LOG_FILE, max_lines)
@@ -285,7 +285,7 @@ def render(company_id: int | None = None):
                     data=buf.getvalue(),
                     file_name="app_log_filtrado.txt",
                     mime="text/plain",
-                    use_container_width=True
+                    width='stretch'
                 )
         elif submitted and not LOG_FILE.exists():
             st.warning("No hay archivo de log para mostrar.")
@@ -316,7 +316,7 @@ def render(company_id: int | None = None):
             remove_accents = st.checkbox("Quitar tildes", value=False)
 
         dry = st.toggle("Dry-run (simular sin escribir)", value=True)
-        if st.button("🚿 Ejecutar normalización", use_container_width=True):
+        if st.button("🚿 Ejecutar normalización", width='stretch'):
             try:
                 res = run_normalization(
                     company_id=selected_company,

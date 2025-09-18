@@ -27,6 +27,17 @@ CANCEL_TYPES = tuple(
     if t in ("CANCELA_PIGNORACION", "CANCELA_EMBARGO", "LEV_GRAVAMEN", "ALZAMIENTO")
 )
 
+def _clean_str_series(s: pd.Series) -> pd.Series:
+    return (
+        s.apply(
+            lambda x: x.decode("utf-8", "ignore")
+            if isinstance(x, (bytes, bytearray))
+            else ("" if x is None else str(x))
+        )
+        .astype("string")
+        .str.strip()
+    )
+
 def _partners_maps(company_id: int):
     partners = list_partners(company_id)
     choices = [p["id"] for p in partners]
@@ -87,9 +98,37 @@ def render(company_id: int):
         "documento","observaciones",
     ]
     df_view = pd.DataFrame(data_ui)
+
+    # Asegura que existan todas las columnas esperadas
     for c in cols_view:
         if c not in df_view.columns:
             df_view[c] = None
+
+    # --- NORMALIZACIÓN SEGURA ANTES DE PINTAR ---
+    if not df_view.empty:
+        # Texto: evita mezcla None/str (nombres de socio, tipo, doc, obs)
+        for c in ("socio_transmite", "socio_adquiere", "tipo", "documento", "observaciones"):
+            if c in df_view.columns:
+                df_view[c] = _clean_str_series(df_view[c])
+
+        # Fecha: a ISO (string) si aparece como datetime o mixto
+        if "fecha" in df_view.columns:
+            df_view["fecha"] = (
+                pd.to_datetime(df_view["fecha"], errors="coerce")
+                .dt.strftime("%Y-%m-%d")
+                .astype("string")
+            )
+
+        # Enteros "nullable" (evita 1.0 y permite vacíos)
+        for c in ("rango_desde", "rango_hasta", "n_participaciones", "correlativo"):
+            if c in df_view.columns:
+                df_view[c] = pd.to_numeric(df_view[c], errors="coerce").astype("Int64")
+
+        # Nominal: numérico (float) o NaN (no mezclar str/None/float)
+        if "nuevo_valor_nominal" in df_view.columns:
+            df_view["nuevo_valor_nominal"] = pd.to_numeric(df_view["nuevo_valor_nominal"], errors="coerce")
+
+    # Pintado
     st.dataframe(df_view[cols_view], width="stretch", hide_index=True)
 
     st.markdown("---")
