@@ -4,3 +4,4 @@ reportlab>=4.4
 XlsxWriter>=3.2
 typing-extensions>=4.15
 streamlit-aggrid
+openpyxl>=3.1

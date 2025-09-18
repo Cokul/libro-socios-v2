@@ -14,16 +14,11 @@ from app.core.services.maintenance_service import (
     run_analyze, run_reindex, run_vacuum,
     recompute_correlativos, ensure_min_indexes,
 )
-from app.core.services.normalization_service import run_normalization  # 👈 NUEVO
-
+from app.core.services.normalization_service import run_normalization
 from app.infra.db import get_connection
 from app.infra.logging import LOG_FILE
 
-# ⬇️ Importaciones (CSV)
-from app.ui.pages import imports
-
 log = logging.getLogger(__name__)
-
 LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 def _read_tail(path: Path, max_lines: int) -> list[str]:
@@ -45,9 +40,7 @@ def render(company_id: int | None = None):
         "🧽 Normalización",
     ])
 
-    # =========================
     # 1) BACKUPS
-    # =========================
     with tabs[0]:
         st.markdown("### Copias de seguridad")
         colA, colB = st.columns([1, 2], gap="large")
@@ -117,9 +110,7 @@ def render(company_id: int | None = None):
 
         st.caption(f"BD activa: `{(BK_DIR.parent / 'libro_socios.db')}`  •  Carpeta de backups: `{BK_DIR}`")
 
-    # =========================
     # 2) SALUD BD
-    # =========================
     with tabs[1]:
         st.markdown("### Comprobaciones de integridad")
         c1, c2 = st.columns(2)
@@ -156,9 +147,7 @@ def render(company_id: int | None = None):
         with col5:
             st.caption("Botones individuales por si necesitas aislar un problema.")
         
-        # =========================
         # 3) CORRELATIVOS POR SOCIEDAD
-        # =========================
         st.divider()
         st.markdown("### Correlativos por sociedad")
 
@@ -195,19 +184,15 @@ def render(company_id: int | None = None):
                     scope = "both"
                 else:
                     scope = selected[0]
-
-                with st.status("Recalculando correlativos…", expanded=True) as status:
-                    try:
-                        res = recompute_correlativos(company_id=selected_company_id, scope=scope)
-                        status.update(label="Recompute finalizado ✅", state="complete")
-                        st.success(
-                            f"Hecho. Socios: {res.get('partners',0)} • "
-                            f"Eventos: {res.get('events',0)} • "
-                            f"Gobernanza: {res.get('governance',0)}"
-                        )
-                    except Exception as e:
-                        status.update(label="Error durante el recompute", state="error")
-                        st.error(f"Error: {e}")  
+                try:
+                    res = recompute_correlativos(company_id=selected_company_id, scope=scope)
+                    st.success(
+                        f"Hecho. Socios: {res.get('partners',0)} • "
+                        f"Eventos: {res.get('events',0)} • "
+                        f"Gobernanza: {res.get('governance',0)}"
+                    )
+                except Exception as e:
+                    st.error(f"Error: {e}")  
         
         st.divider()
         st.markdown("### Índices SQL mínimos")
@@ -227,9 +212,7 @@ def render(company_id: int | None = None):
                 except Exception as e:
                     st.error(f"Error creando/verificando índices: {e}")
 
-    # =========================
     # 4) MANTENIMIENTO
-    # =========================
     with tabs[2]:
         st.markdown("### Operaciones periódicas")
         with st.form("form_maintenance"):
@@ -245,21 +228,14 @@ def render(company_id: int | None = None):
             run = st.form_submit_button("▶️ Ejecutar selección", use_container_width=True)
 
             if run:
-                with st.status("Ejecutando mantenimiento…", expanded=True) as status:
-                    if do_analyze:
-                        status.write("• ANALYZE…"); run_analyze()
-                    if do_reindex:
-                        status.write("• REINDEX…"); run_reindex()
-                    if do_vacuum:
-                        status.write("• VACUUM…"); run_vacuum()
-                    status.update(label="Mantenimiento completado ✅", state="complete")
+                if do_analyze:  run_analyze()
+                if do_reindex:  run_reindex()
+                if do_vacuum:   run_vacuum()
                 st.success("Operación finalizada.")
 
         st.caption("Sugerencias: ANALYZE tras cargas grandes; REINDEX si sospechas corrupción de índices; VACUUM para compactar.")
 
-    # =========================
     # 5) LOGS
-    # =========================
     with tabs[3]:
         st.markdown("### Visor de logs")
         if LOG_FILE.exists():
@@ -314,33 +290,30 @@ def render(company_id: int | None = None):
         elif submitted and not LOG_FILE.exists():
             st.warning("No hay archivo de log para mostrar.")
 
-    # =========================
-    # 6) IMPORTACIONES (CSV)
-    # =========================
+    # 6) IMPORTACIONES
     with tabs[4]:
-        imports.render(company_id)
+        from app.ui.pages import imports as imports_page  # import perezoso para evitar ciclos
+        imports_page.render(company_id)
 
-    # =========================
-    # 7) NORMALIZACIÓN AVANZADA
-    # =========================
+    # 7) NORMALIZACIÓN
     with tabs[5]:
         st.markdown("### Normalización avanzada")
-        st.caption("Limpia nombres (espacios, mayúsculas/minúsculas, partículas) y NIF/NIE/CIF. Puedes ejecutar en modo ‘dry-run’ para ver ejemplos sin escribir.")
+        st.caption("Limpia nombres y NIF/NIE/CIF. Puedes ejecutar en modo ‘dry-run’.")
 
         col_top1, col_top2 = st.columns([1, 1])
         with col_top1:
-            scope = st.selectbox("Ámbito", ["both", "partners", "governance"], index=0, help="Dónde aplicar la normalización.")
+            scope = st.selectbox("Ámbito", ["both", "partners", "governance"], index=0)
         with col_top2:
             selected_company = company_id if company_id else None
-            st.text_input("Sociedad (id)", value=str(selected_company or ""), disabled=True, help="Se usa la sociedad seleccionada en la barra lateral.")
+            st.text_input("Sociedad (id)", value=str(selected_company or ""), disabled=True)
 
         col_opt1, col_opt2, col_opt3 = st.columns(3)
         with col_opt1:
-            fix_names = st.checkbox("Corregir nombres", value=True)  # <- renombrado
+            fix_names = st.checkbox("Corregir nombres", value=True)
         with col_opt2:
             fix_nif = st.checkbox("Corregir NIF/NIE/CIF", value=True)
         with col_opt3:
-            remove_accents = st.checkbox("Quitar tildes", value=False, help="⚠️ Úsalo solo si quieres nombres sin tildes.")
+            remove_accents = st.checkbox("Quitar tildes", value=False)
 
         dry = st.toggle("Dry-run (simular sin escribir)", value=True)
         if st.button("🚿 Ejecutar normalización", use_container_width=True):
@@ -348,7 +321,7 @@ def render(company_id: int | None = None):
                 res = run_normalization(
                     company_id=selected_company,
                     scope=scope,
-                    fix_names=fix_names,          # <- actualizado
+                    fix_names=fix_names,
                     fix_nif=fix_nif,
                     remove_accents=remove_accents,
                     dry_run=dry,
@@ -362,33 +335,8 @@ def render(company_id: int | None = None):
                         "dry_run": res["dry_run"]
                     }
                 })
-                with st.expander("Muestra de cambios (partners)"):
-                    st.json(res["partners"]["samples"])
-                with st.expander("Muestra de cambios (gobernanza)"):
-                    st.json(res["governance"]["samples"])
             except Exception as e:
                 st.error(f"Error en normalización: {e}")
-        
-        # --- Columnas auxiliares (denormalizadas) ---
-        st.markdown("##### Columnas auxiliares (si existen)")
-        st.caption("Rellena `partners.search_name` y `partners.name_ascii` a partir de `nombre` (solo si las columnas existen).")
-
-        c1, c2 = st.columns([1,3])
-        with c1:
-            do_denorm = st.button("↻ Rellenar columnas auxiliares", key="btn_denorm_fields", use_container_width=True)
-        with c2:
-            st.write("")
-
-        if do_denorm:
-            try:
-                from app.core.services.maintenance_service import recompute_denormalized
-                res = recompute_denormalized(company_id)
-                msg = res.get("partners", {})
-                st.success(f"partners: examinados {msg.get('examined',0)}, actualizados {msg.get('updated',0)}")
-                if msg.get("details"):
-                    st.json(msg["details"])
-            except Exception as e:
-                st.error(f"Error ejecutando el recompute: {e}")
 
 def _render_health_summary(summary: dict):
     ok_i = summary.get("integrity_ok", False)
