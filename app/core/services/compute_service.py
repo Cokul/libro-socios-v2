@@ -60,11 +60,14 @@ def _apply_events(events: list[dict], valor_nominal_inicial: float = 5.0, part_t
     for ev in events:
         ev = ev.copy()
         ev["tipo"] = normalize_event_type(ev.get("tipo"))
-        by_date[str(ev["fecha"])] .append(ev)
+        by_date[str(ev["fecha"])].append(ev)
 
     for f in sorted(by_date.keys()):
         day = by_date[f]
         last_fecha = f
+
+        # contexto del día: secuencia de cambios de VN por AMPL_VALOR/RED_VALOR (para la regla especial)
+        vn_changes_same_day: list[Decimal] = []
 
         def _get_range(e):
             return (e.get('rango_desde') or 0, e.get('rango_hasta') or 0)
@@ -101,7 +104,7 @@ def _apply_events(events: list[dict], valor_nominal_inicial: float = 5.0, part_t
                 total_part = max(total_part, h)
             blocks = _consolidate(blocks)
 
-        # 4) USUFRUCTO / PIGNORACION / EMBARGO y AMPL_VALOR / RED_VALOR
+        # 4) USUFRUCTO / PIGNORACION / EMBARGO
         for ev in [e for e in day if e.get('tipo') in ('USUFRUCTO','PIGNORACION','EMBARGO')]:
             d, h = ev.get('rango_desde'), ev.get('rango_hasta')
             if ev.get('tipo') == 'USUFRUCTO':
@@ -116,14 +119,23 @@ def _apply_events(events: list[dict], valor_nominal_inicial: float = 5.0, part_t
                 blocks = _consolidate(new_blocks)
             else:
                 holder = ev.get('socio_adquiere') or ev.get('socio_transmite')
-                blocks.append(dict(socio_id=holder, right_type=('prenda' if ev.get('tipo')=='PIGNORACION' else 'embargo'),
-                                   rango_desde=d, rango_hasta=h))
+                blocks.append(dict(
+                    socio_id=holder,
+                    right_type=('prenda' if ev.get('tipo')=='PIGNORACION' else 'embargo'),
+                    rango_desde=d, rango_hasta=h
+                ))
                 blocks = _consolidate(blocks)
 
+        # 4.b) AMPL_VALOR / RED_VALOR (solo actualizan VN)
         for ev in [e for e in day if e.get('tipo') in ('AMPL_VALOR','RED_VALOR')]:
             nv = ev.get('nuevo_valor_nominal')
             if nv is not None:
                 valor_nominal = float(nv)
+                # registramos VN del día como Decimal para usarlo en la redenominación especial
+                try:
+                    vn_changes_same_day.append(Decimal(str(nv)))
+                except Exception:
+                    pass
 
         # 5) REDENOMINACION (al cierre del día)
         if any(e.get('tipo') == 'REDENOMINACION' for e in day):
@@ -136,11 +148,10 @@ def _apply_events(events: list[dict], valor_nominal_inicial: float = 5.0, part_t
                 current[b['socio_id']] = current.get(b['socio_id'], 0) + n
 
             old_total = sum(current.values())
-            old_vn = Decimal(str(valor_nominal))
-            old_capital = old_vn * Decimal(old_total)
 
             # VN nuevo (opcional, pero si viene debe ser único y > 0)
-            vn_candidates = [e.get('nuevo_valor_nominal') for e in day if e.get('tipo') == 'REDENOMINACION' and e.get('nuevo_valor_nominal') not in (None, "")]
+            vn_candidates = [e.get('nuevo_valor_nominal') for e in day
+                             if e.get('tipo') == 'REDENOMINACION' and e.get('nuevo_valor_nominal') not in (None, "")]
             new_vn = None
             if vn_candidates:
                 vals = [float(v) for v in vn_candidates]
@@ -150,39 +161,74 @@ def _apply_events(events: list[dict], valor_nominal_inicial: float = 5.0, part_t
                 if new_vn <= 0:
                     raise ValueError(f"Nuevo valor nominal inválido en REDENOMINACION del día {f}: {new_vn}")
 
+            # === Regla 1: capital de referencia del día (p.ej. reducción a 0,938 y luego redenominar a 1€) ===
+            old_vn_decimal = Decimal(str(valor_nominal))
             if new_vn is None:
+                capital_ref = old_vn_decimal * Decimal(old_total)
                 new_total = old_total
             else:
-                ratio = (old_capital / new_vn)
+                vn_base_for_capital = None
+                if vn_changes_same_day:
+                    equal_new = any(abs(v - new_vn) < Decimal("0.0000005") for v in vn_changes_same_day)
+                    if equal_new:
+                        diffs = [v for v in vn_changes_same_day if abs(v - new_vn) >= Decimal("0.0000005")]
+                        if diffs:
+                            # usamos el ÚLTIMO VN del día distinto del new_vn (ej.: 0,938)
+                            vn_base_for_capital = diffs[-1]
+                if vn_base_for_capital is None:
+                    vn_base_for_capital = old_vn_decimal
+
+                capital_ref = vn_base_for_capital * Decimal(old_total)
+                ratio = (capital_ref / new_vn)
                 if ratio != ratio.to_integral_value():
-                    raise ValueError(f"El capital {old_capital} no es múltiplo del nuevo VN {new_vn} en REDENOMINACION del día {f}.")
+                    raise ValueError(
+                        f"El capital {capital_ref} no es múltiplo del nuevo VN {new_vn} en REDENOMINACION del día {f}."
+                    )
                 new_total = int(ratio)
                 valor_nominal = float(new_vn)
 
-            # Reasignación proporcional por restos (enteros, suma exacta)
+            # === Regla 2: respetar bloques explícitos en la redenominación (si vienen) ===
+            reden_rows = [
+                e for e in day
+                if e.get('tipo') == 'REDENOMINACION'
+                and (e.get('rango_desde') is not None)
+                and (e.get('rango_hasta') is not None)
+                and (e.get('socio_transmite') is not None or e.get('socio_adquiere') is not None)
+            ]
+
             if old_total == 0:
                 blocks = _consolidate(blocks)
                 total_part = 0
             else:
-                socios = sorted(current.keys())
-                exact = {sid: (Decimal(current[sid]) * Decimal(str(new_total)) / Decimal(old_total)) for sid in socios}
-                base  = {sid: int(exact[sid].to_integral_value(rounding=ROUND_FLOOR)) for sid in socios}
-                asignadas = sum(base.values())
-                resto = new_total - asignadas
-                fracs = sorted([(sid, (exact[sid] - Decimal(base[sid]))) for sid in socios], key=lambda x: (x[1], -x[0]), reverse=True)
-                for i in range(resto):
-                    base[fracs[i][0]] += 1
-
-                cursor = 1
-                new_blocks = []
-                for sid in socios:
-                    n = base[sid]
-                    if n <= 0:
-                        continue
-                    new_blocks.append(dict(socio_id=sid, right_type='plena', rango_desde=cursor, rango_hasta=cursor+n-1))
-                    cursor += n
-                blocks = _consolidate(new_blocks)
-                total_part = new_total
+                if reden_rows:
+                    tmp = []
+                    for e in sorted(reden_rows, key=lambda x: (int(x.get('rango_desde') or 0), int(x.get('rango_hasta') or 0))):
+                        owner = e.get('socio_transmite') or e.get('socio_adquiere')
+                        rd = int(e.get('rango_desde') or 0); rh = int(e.get('rango_hasta') or 0)
+                        tmp.append(dict(socio_id=int(owner), right_type='plena', rango_desde=rd, rango_hasta=rh))
+                    blocks = _consolidate(tmp)
+                    total_part = max(b['rango_hasta'] for b in blocks if b['right_type']=='plena')
+                else:
+                    # Reasignación proporcional por restos (comportamiento previo)
+                    socios = sorted(current.keys())
+                    exact = {sid: (Decimal(current[sid]) * Decimal(str(new_total)) / Decimal(old_total)) for sid in socios}
+                    base  = {sid: int(exact[sid].to_integral_value(rounding=ROUND_FLOOR)) for sid in socios}
+                    asignadas = sum(base.values())
+                    resto = new_total - asignadas
+                    fracs = sorted([(sid, (exact[sid] - Decimal(base[sid]))) for sid in socios],
+                                   key=lambda x: (x[1], -x[0]), reverse=True)
+                    for i in range(resto):
+                        base[fracs[i][0]] += 1
+                    cursor = 1
+                    new_blocks = []
+                    for sid in socios:
+                        n = base[sid]
+                        if n <= 0:
+                            continue
+                        new_blocks.append(dict(socio_id=sid, right_type='plena', rango_desde=cursor, rango_hasta=cursor+n-1))
+                        cursor += n
+                    blocks = _consolidate(new_blocks)
+                    total_part = new_total
 
         # ajuste fin día: recalcula total por bloques 'plena'
         total_part = sum(_len_block(b) for b in blocks if b['right_type'] == 'plena')

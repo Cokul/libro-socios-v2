@@ -20,6 +20,9 @@ from app.core.services.export_service import (
     export_ledger_pdf_legalizable, export_ledger_excel_legalizable,
 )
 
+MIN_REPORT_DATE = dt.date(1900, 1, 1)
+MAX_REPORT_DATE = dt.date.today()
+
 # ------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------
@@ -49,9 +52,18 @@ def render(company_id: int | None = None):
 
     # ---------- Filtro GLOBAL "A fecha" ----------
     st.markdown("#### Filtros generales")
+    # Asegura un valor dentro de los límites
+    _asof_val = st.session_state.get(_as_of_state_key(), dt.date.today())
+    if _asof_val < MIN_REPORT_DATE:
+        _asof_val = MIN_REPORT_DATE
+    elif _asof_val > MAX_REPORT_DATE:
+        _asof_val = MAX_REPORT_DATE
+
     st.session_state[_as_of_state_key()] = st.date_input(
         "A fecha (global)",
-        value=st.session_state.get(_as_of_state_key(), dt.date.today()),
+        value=_asof_val,
+        min_value=MIN_REPORT_DATE,
+        max_value=MAX_REPORT_DATE,
         format="YYYY-MM-DD",
         key="rep_global_as_of_input",
     )
@@ -438,6 +450,7 @@ def render(company_id: int | None = None):
             st.subheader("Participaciones acumuladas")
             tl_plot = tl.copy()
             tl_plot["date"] = pd.to_datetime(tl_plot["date"])
+            # Built-in chart: no pasar width ni use_container_width (Altair valida width numérico)
             st.line_chart(tl_plot.set_index("date")["total_shares_acum"])
 
         st.divider()
@@ -449,6 +462,7 @@ def render(company_id: int | None = None):
             st.subheader("Capital social (€)")
             cl_plot = cl.copy()
             cl_plot["date"] = pd.to_datetime(cl_plot["date"])
+            # Built-in chart: no pasar width ni use_container_width
             st.line_chart(cl_plot.set_index("date")["capital_social"])
 
 # Hook para routing
